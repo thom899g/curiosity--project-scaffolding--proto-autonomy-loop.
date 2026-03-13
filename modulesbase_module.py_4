@@ -1,0 +1,37 @@
+def log_outcome(self, event, success, data=None, error=None):
+        """
+        Log the outcome of an action to Firestore (audit log) and update real-time state.
+        """
+        # Get current timestamp for Firestore
+        from firebase_admin import firestore
+        from firebase_admin import db
+        
+        log_entry = {
+            'timestamp': firestore.SERVER_TIMESTAMP,
+            'module': self.module_id,
+            'event': event,
+            'success': success,
+            'data': data,
+            'error': error
+        }
+        
+        # Add to Firestore audit log (append-only)
+        self.firestore_db.collection('audit_logs').add(log_entry)
+        
+        # Update real-time state for this module (e.g., last heartbeat, performance metrics)
+        # We use Realtime Database server timestamp for last_heartbeat
+        module_state_ref = self.realtime_db.child('state').child('modules').child(self.module_id)
+        module_state_ref.update({
+            'last_heartbeat': {'.sv': 'timestamp'},  # Realtime Database server timestamp
+            'last_event_processed': event,
+            'last_outcome': 'success' if success else 'failure'
+        })
+        
+        # Also, update performance metrics in Firestore
+        metrics_ref = self.firestore_db.collection('performance_metrics').document(self.module_id)
+        # We can do a transactional update to increment counts, etc.
+        # For simplicity, we'll just set the last outcome
+        metrics_ref.set({
+            'last_outcome': log_entry,
+            'updated_at': firestore.SERVER_TIMESTAMP
+        }, merge=True)
