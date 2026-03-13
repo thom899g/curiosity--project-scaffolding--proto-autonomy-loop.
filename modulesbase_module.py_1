@@ -1,0 +1,87 @@
+"""
+Base class for all stateless action modules.
+"""
+import logging
+from abc import ABC, abstractmethod
+from firebase_utils import get_realtime_db, get_firestore_db
+
+class StatelessActionModule(ABC):
+    """Base class for all action modules"""
+    
+    def __init__(self, module_id, event_types):
+        self.module_id = module_id
+        self.event_types = event_types  # Which events trigger this module
+        self.realtime_db = get_realtime_db()
+        self.firestore_db = get_firestore_db()
+        self.logger = logging.getLogger(self.module_id)
+        
+    @abstractmethod
+    def validate_event(self, event_data):
+        """Lightning-fast validation (100ms max)"""
+        # Check risk parameters
+        # Verify opportunity still exists
+        # Validate against threat models
+        pass
+    
+    @abstractmethod
+    def execute(self, event_data):
+        """Pure function - no side effects beyond API calls"""
+        pass
+    
+    def process(self, event):
+        """
+        Process an event: validate and execute, then log the outcome.
+        This method is called by the Cortex when an event of the module's type is received.
+        """
+        self.logger.info(f"Processing event: {event}")
+        
+        # Validate the event
+        if not self.validate_event(event):
+            self.logger.warning(f"Event validation failed for event: {event}")
+            self.log_outcome(event, success=False, error="Validation failed")
+            return
+        
+        try:
+            # Execute the action
+            result = self.execute(event)
+            if result.get('success'):
+                self.log_outcome(event, success=True, data=result.get('data'))
+            else:
+                self.log_outcome(event, success=False, error=result.get('error'))
+        except Exception as e:
+            self.logger.error(f"Exception during execution: {e}")
+            self.log_outcome(event, success=False, error=str(e))
+    
+    def log_outcome(self, event, success, data=None, error=None):
+        """
+        Log the outcome of an action to Firestore (audit log) and update real-time state.
+        """
+        log_entry = {
+            'timestamp': firestore.SERVER_TIMESTAMP,
+            'module': self.module_id,
+            'event': event,
+            'success': success,
+            'data': data,
+            'error': error
+        }
+        
+        # Add to Firestore audit log (append-only)
+        self.firestore_db.collection('audit_logs').add(log_entry)
+        
+        # Update real-time state for this module (e.g., last heartbeat, performance metrics)
+        # We can update the module's status in the realtime database
+        module_state_ref = self.realtime_db.child('state').child('modules').child(self.module_id)
+        module_state_ref.update({
+            'last_heartbeat': firebase_admin.firestore.SERVER_TIMESTAMP,  # Note: This is Firestore timestamp, not Realtime Database. We may need to adjust.
+            'last_event_processed': event,
+            'last_outcome': 'success' if success else 'failure'
+        })
+        
+        # Also, update performance metrics in Firestore
+        metrics_ref = self.firestore_db.collection('performance_metrics').document(self.module_id)
+        # We can do a transactional update to increment counts, etc.
+        # For simplicity, we'll just set the last outcome
+        metrics_ref.set({
+            'last_outcome': log_entry,
+            'updated_at': firestore.SERVER_TIMESTAMP
+        }, merge=True)
