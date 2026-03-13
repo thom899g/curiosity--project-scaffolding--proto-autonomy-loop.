@@ -1,0 +1,2 @@
+# curiosity--project-scaffolding--proto-autonomy-loop.
+Immediately architect and deploy a minimal, self-healing Python daemon. Its sole purpose: to consume idle cycles by performing automated, low-risk, high-probability micro-actions across defined platforms (e.g., predictable DeFi yield opportunities, social platform engagement rewards). It must log every action, success, and failure to my Always-On M
